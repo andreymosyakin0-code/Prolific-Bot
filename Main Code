@@ -1,0 +1,297 @@
+// ==UserScript==
+// @name         Prolific Auto-Accept Studies
+// @namespace    http://tampermonkey.net/
+// @version      2.0
+// @description  Automatically accept studies on Prolific with control menu
+// @author       You
+// @match        https://app.prolific.com/studies*
+// @match        https://www.prolific.com/*
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @run-at       document-end
+// @downloadURL https://update.greasyfork.org/scripts/580425/Prolific%20Auto-Accept%20Studies.user.js
+// @updateURL https://update.greasyfork.org/scripts/580425/Prolific%20Auto-Accept%20Studies.meta.js
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // Settings
+    let isEnabled = GM_getValue('autoAcceptEnabled', true);
+    let acceptCount = GM_getValue('acceptCount', 0);
+    let failedCount = GM_getValue('failedCount', 0);
+    let menuX = GM_getValue('menuX', window.innerWidth - 295);
+    let menuY = GM_getValue('menuY', 70);
+    let soundEnabled = GM_getValue('soundEnabled', true);
+
+    // Audio URL - your custom sound
+    const AUDIO_URL = 'https://github.com/user-attachments/files/28318322/audio_alert.mp3';
+
+    // Function to play the notification sound
+    function playNotificationSound() {
+        if (!soundEnabled) return;
+
+        try {
+            const audio = new Audio(AUDIO_URL);
+            audio.volume = 0.5; // Set volume to 50%
+            audio.play().catch(err => {
+                console.log('[Prolific] Could not play audio:', err.message);
+            });
+        } catch (e) {
+            console.log('[Prolific] Error loading audio:', e.message);
+        }
+    }
+
+    // Create menu container
+    function createMenu() {
+        // Remove if already exists
+        const existing = document.getElementById('prolific-auto-accept-menu');
+        if (existing) existing.remove();
+
+        const container = document.createElement('div');
+        container.id = 'prolific-auto-accept-menu';
+        container.style.cssText = `
+            position: fixed;
+            top: ${menuY}px;
+            left: ${menuX}px;
+            z-index: 10000;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+            padding: 0;
+            min-width: 300px;
+            user-select: none;
+        `;
+
+        container.innerHTML = `
+            <div id="prolific-menu-header" style="padding: 15px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; cursor: move; background: linear-gradient(to right, #f9f9f9, #ffffff);">
+                <span style="font-weight: 600; font-size: 14px;">Auto-Accept</span>
+                <button id="prolific-menu-toggle" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 0; width: 20px; height: 20px;">▼</button>
+            </div>
+            <div id="prolific-menu-content" style="padding: 15px;">
+                <div style="margin-bottom: 12px;">
+                    <label style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="prolific-auto-accept-toggle" ${isEnabled ? 'checked' : ''} style="margin-right: 8px; cursor: pointer;">
+                        <span style="font-size: 13px;">Enable auto-accept</span>
+                    </label>
+                </div>
+                <div style="margin-bottom: 12px;">
+                    <label style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="prolific-sound-toggle" ${soundEnabled ? 'checked' : ''} style="margin-right: 8px; cursor: pointer;">
+                        <span style="font-size: 13px;">Enable sound alert</span>
+                    </label>
+                </div>
+                <div style="background: #f5f5f5; padding: 10px; border-radius: 4px; margin-bottom: 12px;">
+                    <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Studies Accepted</div>
+                    <div style="font-size: 20px; font-weight: 600; color: #2563eb;" id="prolific-accept-count">${acceptCount}</div>
+                </div>
+                <div style="background: #fff5f5; padding: 10px; border-radius: 4px; margin-bottom: 12px;">
+                    <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Failed to Accept</div>
+                    <div style="font-size: 20px; font-weight: 600; color: #dc2626;" id="prolific-failed-count">${failedCount}</div>
+                </div>
+                <button id="prolific-test-sound" style="width: 100%; padding: 8px; background: #e0e0ff; border: 1px solid #b0b0ff; border-radius: 4px; cursor: pointer; font-size: 12px; margin-bottom: 12px; transition: background 0.2s;">Test Sound</button>
+                <div id="prolific-debug" style="background: #f9f9f9; padding: 8px; border-radius: 4px; margin-bottom: 12px; font-size: 10px; color: #666; max-height: 150px; overflow-y: auto; font-family: monospace; border: 1px solid #eee; line-height: 1.4;"></div>
+                <button id="prolific-reset-count" style="width: 100%; padding: 8px; background: #f0f0f0; border: 1px solid #ddd; border-radius: 4px; cursor: pointer; font-size: 12px; transition: background 0.2s;">Reset All</button>
+            </div>
+        `;
+
+        document.body.appendChild(container);
+
+        // Make header draggable
+        const header = document.getElementById('prolific-menu-header');
+        let isDragging = false;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        header.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            offsetX = e.clientX - container.offsetLeft;
+            offsetY = e.clientY - container.offsetTop;
+            header.style.cursor = 'grabbing';
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                menuX = e.clientX - offsetX;
+                menuY = e.clientY - offsetY;
+                container.style.left = menuX + 'px';
+                container.style.top = menuY + 'px';
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                header.style.cursor = 'move';
+                // Save position
+                GM_setValue('menuX', menuX);
+                GM_setValue('menuY', menuY);
+            }
+        });
+
+        // Toggle menu
+        document.getElementById('prolific-menu-toggle').addEventListener('click', function() {
+            const content = document.getElementById('prolific-menu-content');
+            const toggle = this;
+            if (content.style.display === 'none') {
+                content.style.display = 'block';
+                toggle.textContent = '▼';
+            } else {
+                content.style.display = 'none';
+                toggle.textContent = '▶';
+            }
+        });
+
+        // Toggle auto-accept
+        document.getElementById('prolific-auto-accept-toggle').addEventListener('change', function() {
+            isEnabled = this.checked;
+            GM_setValue('autoAcceptEnabled', isEnabled);
+            addDebugLog(`Auto-accept ${isEnabled ? 'enabled' : 'disabled'}`);
+        });
+
+        // Toggle sound
+        document.getElementById('prolific-sound-toggle').addEventListener('change', function() {
+            soundEnabled = this.checked;
+            GM_setValue('soundEnabled', soundEnabled);
+            addDebugLog(`Sound ${soundEnabled ? 'enabled' : 'disabled'}`);
+        });
+
+        // Test sound button
+        document.getElementById('prolific-test-sound').addEventListener('click', function() {
+            addDebugLog('Testing sound...');
+            playNotificationSound();
+        });
+
+        // Reset count
+        document.getElementById('prolific-reset-count').addEventListener('click', function() {
+            acceptCount = 0;
+            failedCount = 0;
+            GM_setValue('acceptCount', 0);
+            GM_setValue('failedCount', 0);
+            document.getElementById('prolific-accept-count').textContent = '0';
+            document.getElementById('prolific-failed-count').textContent = '0';
+            addDebugLog('All counts reset');
+        });
+    }
+
+    function addDebugLog(msg) {
+        const debugEl = document.getElementById('prolific-debug');
+        if (debugEl) {
+            const time = new Date().toLocaleTimeString();
+            debugEl.innerHTML = `[${time}] ${msg}<br>` + debugEl.innerHTML;
+            debugEl.scrollTop = 0;
+        }
+        console.log(`[Prolific] ${msg}`);
+    }
+
+    // Function to check if study is full
+    function isStudyFull() {
+        const pageText = document.body.innerText.toLowerCase();
+        return pageText.includes('study is full') ||
+               pageText.includes('no more places') ||
+               pageText.includes('places available') ||
+               pageText.includes('all spots taken');
+    }
+
+    // Function to find and click accept buttons
+    function acceptStudies() {
+        if (!isEnabled) return;
+
+        // Check if study is full
+        if (isStudyFull()) {
+            addDebugLog('⚠ Study is full! Refreshing...');
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+            return;
+        }
+
+        const allButtons = document.querySelectorAll('button');
+
+        // Look for "Take part in this study" button
+        const acceptBtns = Array.from(allButtons).filter(btn => {
+            const text = btn.textContent.trim();
+            return text === 'Take part in this study' && !btn.disabled && btn.offsetParent !== null;
+        });
+
+        if (acceptBtns.length > 0) {
+            addDebugLog(`Found ${acceptBtns.length} study button(s)`);
+            acceptBtns.forEach((btn, index) => {
+                setTimeout(() => {
+                    try {
+                        btn.click();
+                        playNotificationSound();
+
+                        // Wait a bit and check if the acceptance was successful
+                        setTimeout(() => {
+                            // Check if we're still on the same page with the study details
+                            // If the button is gone or page changed, it was likely accepted
+                            const stillHasButton = Array.from(document.querySelectorAll('button')).some(b => {
+                                const text = b.textContent.trim();
+                                return text === 'Take part in this study' && !b.disabled;
+                            });
+
+                            if (stillHasButton) {
+                                // Button still exists - acceptance likely failed
+                                failedCount++;
+                                GM_setValue('failedCount', failedCount);
+                                const failedEl = document.getElementById('prolific-failed-count');
+                                if (failedEl) {
+                                    failedEl.textContent = failedCount;
+                                }
+                                const now = new Date();
+                                const timeStr = now.toLocaleTimeString();
+                                addDebugLog(`✗ Failed to accept at ${timeStr} (${failedCount} failed)`);
+                            } else {
+                                // Button is gone - acceptance was successful
+                                acceptCount++;
+                                GM_setValue('acceptCount', acceptCount);
+                                const countElement = document.getElementById('prolific-accept-count');
+                                if (countElement) {
+                                    countElement.textContent = acceptCount;
+                                }
+                                const now = new Date();
+                                const timeStr = now.toLocaleTimeString();
+                                addDebugLog(`✓ Successfully accepted at ${timeStr} (${acceptCount} total)`);
+                            }
+                        }, 1500);
+
+                    } catch (e) {
+                        addDebugLog(`✗ Error: ${e.message}`);
+                    }
+                }, index * 500);
+            });
+        }
+    }
+
+    // Initialize
+    setTimeout(() => {
+        createMenu();
+        addDebugLog('Script initialized');
+        acceptStudies();
+    }, 500);
+
+    // Run periodically
+    setInterval(acceptStudies, 2000);
+
+    // Intercept fetch
+    const originalFetch = window.fetch;
+    window.fetch = function(...args) {
+        return originalFetch.apply(this, args).then(response => {
+            setTimeout(acceptStudies, 500);
+            return response;
+        });
+    };
+
+    // Intercept XMLHttpRequest
+    const originalOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(...args) {
+        this.addEventListener('load', () => {
+            setTimeout(acceptStudies, 500);
+        });
+        return originalOpen.apply(this, args);
+    };
+
+    console.log('Prolific Auto-Accept script loaded');
+})();
