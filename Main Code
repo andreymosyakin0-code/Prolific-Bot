@@ -5,7 +5,7 @@
 // @description  Automatically accept studies on Prolific with control menu
 // @author       You
 // @match        https://app.prolific.com/studies*
-// @match        https://www.prolific.com/*
+// @match        https://app.prolific.co/*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @run-at       document-end
