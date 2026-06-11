@@ -4,3 +4,4 @@ If you find any bugs/glitches or if you know how I can impove my script you can 
 To dowload/use the script you need to click "install this script" or go to code tab and copy (ctrl/cmd A) the text that is written in "source code" and paste it into tampermonkey (I like to use it and it is tested there) and it should work.
 If the menu doesnt pop up in https://www.prolific.com/ or in https://app.prolific.com/studies you should reload the cite or watch a tutorial how to use tampermonkey or if it still doesnt work you should write it in feedback and I'll help!
 I'm pretty sure its undetectable!
+To reset the position of the script press the Right-Shift
