@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prolific Auto-Accept Studies
 // @namespace    http://tampermonkey.net/
-// @version      2.0
+// @version      2.4
 // @description  Automatically accept studies on Prolific with control menu
 // @author       You
 // @match        https://app.prolific.com/studies*
@@ -9,8 +9,6 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @run-at       document-end
-// @downloadURL https://update.greasyfork.org/scripts/580425/Prolific%20Auto-Accept%20Studies.user.js
-// @updateURL https://update.greasyfork.org/scripts/580425/Prolific%20Auto-Accept%20Studies.meta.js
 // ==/UserScript==
 
 (function() {
@@ -23,6 +21,8 @@
     let menuX = GM_getValue('menuX', window.innerWidth - 295);
     let menuY = GM_getValue('menuY', 70);
     let soundEnabled = GM_getValue('soundEnabled', true);
+    let lastClickTime = 0;
+    const CLICK_COOLDOWN = 3000; // 3 seconds between accept attempts
 
     // Audio URL - your custom sound
     const AUDIO_URL = 'https://github.com/user-attachments/files/28318322/audio_alert.mp3';
@@ -33,7 +33,7 @@
 
         try {
             const audio = new Audio(AUDIO_URL);
-            audio.volume = 0.5; // Set volume to 50%
+            audio.volume = 0.5;
             audio.play().catch(err => {
                 console.log('[Prolific] Could not play audio:', err.message);
             });
@@ -42,11 +42,51 @@
         }
     }
 
+    // Clamp position to screen bounds
+    function clampPosition(x, y) {
+        const menuWidth = 300;
+        const menuHeight = 400;
+
+        x = Math.max(0, Math.min(x, window.innerWidth - menuWidth));
+        y = Math.max(0, Math.min(y, window.innerHeight - menuHeight));
+
+        return { x, y };
+    }
+
+    function addDebugLog(msg) {
+        const debugEl = document.getElementById('prolific-debug');
+        if (debugEl) {
+            const time = new Date().toLocaleTimeString();
+            debugEl.innerHTML = `[${time}] ${msg}<br>` + debugEl.innerHTML;
+            debugEl.scrollTop = 0;
+        }
+        console.log(`[Prolific] ${msg}`);
+    }
+
+    // Reset menu position to default
+    function resetMenuPosition() {
+        menuX = window.innerWidth - 295;
+        menuY = 70;
+        GM_setValue('menuX', menuX);
+        GM_setValue('menuY', menuY);
+        const container = document.getElementById('prolific-auto-accept-menu');
+        if (container) {
+            container.style.left = menuX + 'px';
+            container.style.top = menuY + 'px';
+        }
+        addDebugLog('Menu position reset!');
+    }
+
     // Create menu container
     function createMenu() {
         // Remove if already exists
         const existing = document.getElementById('prolific-auto-accept-menu');
         if (existing) existing.remove();
+
+        // Clamp position
+        const pos = clampPosition(menuX, menuY);
+        menuX = pos.x;
+        menuY = pos.y;
 
         const container = document.createElement('div');
         container.id = 'prolific-auto-accept-menu';
@@ -91,6 +131,7 @@
                     <div style="font-size: 20px; font-weight: 600; color: #dc2626;" id="prolific-failed-count">${failedCount}</div>
                 </div>
                 <button id="prolific-test-sound" style="width: 100%; padding: 8px; background: #e0e0ff; border: 1px solid #b0b0ff; border-radius: 4px; cursor: pointer; font-size: 12px; margin-bottom: 12px; transition: background 0.2s;">Test Sound</button>
+                <button id="prolific-reset-position" style="width: 100%; padding: 8px; background: #ffe0e0; border: 1px solid #ffb0b0; border-radius: 4px; cursor: pointer; font-size: 12px; margin-bottom: 12px; transition: background 0.2s;">Reset Position</button>
                 <div id="prolific-debug" style="background: #f9f9f9; padding: 8px; border-radius: 4px; margin-bottom: 12px; font-size: 10px; color: #666; max-height: 150px; overflow-y: auto; font-family: monospace; border: 1px solid #eee; line-height: 1.4;"></div>
                 <button id="prolific-reset-count" style="width: 100%; padding: 8px; background: #f0f0f0; border: 1px solid #ddd; border-radius: 4px; cursor: pointer; font-size: 12px; transition: background 0.2s;">Reset All</button>
             </div>
@@ -98,7 +139,7 @@
 
         document.body.appendChild(container);
 
-        // Make header draggable
+        // Make header draggable with clamping
         const header = document.getElementById('prolific-menu-header');
         let isDragging = false;
         let offsetX = 0;
@@ -113,8 +154,16 @@
 
         document.addEventListener('mousemove', (e) => {
             if (isDragging) {
-                menuX = e.clientX - offsetX;
-                menuY = e.clientY - offsetY;
+                let newX = e.clientX - offsetX;
+                let newY = e.clientY - offsetY;
+
+                // Clamp to screen bounds
+                const clamped = clampPosition(newX, newY);
+                newX = clamped.x;
+                newY = clamped.y;
+
+                menuX = newX;
+                menuY = newY;
                 container.style.left = menuX + 'px';
                 container.style.top = menuY + 'px';
             }
@@ -163,6 +212,14 @@
             playNotificationSound();
         });
 
+        // Reset position button
+        const resetBtn = document.getElementById('prolific-reset-position');
+        if (resetBtn) {
+            resetBtn.addEventListener('click', function() {
+                resetMenuPosition();
+            });
+        }
+
         // Reset count
         document.getElementById('prolific-reset-count').addEventListener('click', function() {
             acceptCount = 0;
@@ -173,16 +230,6 @@
             document.getElementById('prolific-failed-count').textContent = '0';
             addDebugLog('All counts reset');
         });
-    }
-
-    function addDebugLog(msg) {
-        const debugEl = document.getElementById('prolific-debug');
-        if (debugEl) {
-            const time = new Date().toLocaleTimeString();
-            debugEl.innerHTML = `[${time}] ${msg}<br>` + debugEl.innerHTML;
-            debugEl.scrollTop = 0;
-        }
-        console.log(`[Prolific] ${msg}`);
     }
 
     // Function to check if study is full
@@ -203,7 +250,14 @@
             addDebugLog('⚠ Study is full! Refreshing...');
             setTimeout(() => {
                 window.location.reload();
-            }, 1000);
+            }, 500);
+            return;
+        }
+
+        const now = Date.now();
+
+        // Check if enough time has passed since last click attempt
+        if (now - lastClickTime < CLICK_COOLDOWN) {
             return;
         }
 
@@ -216,70 +270,73 @@
         });
 
         if (acceptBtns.length > 0) {
-            addDebugLog(`Found ${acceptBtns.length} study button(s)`);
-            acceptBtns.forEach((btn, index) => {
+            lastClickTime = now;
+            addDebugLog(`Found study button - clicking...`);
+
+            try {
+                acceptBtns[0].click();
+                playNotificationSound();
+
+                // Wait and check if the acceptance was successful
                 setTimeout(() => {
-                    try {
-                        btn.click();
-                        playNotificationSound();
+                    const stillHasButton = Array.from(document.querySelectorAll('button')).some(b => {
+                        const text = b.textContent.trim();
+                        return text === 'Take part in this study' && !b.disabled;
+                    });
 
-                        // Wait a bit and check if the acceptance was successful
-                        setTimeout(() => {
-                            // Check if we're still on the same page with the study details
-                            // If the button is gone or page changed, it was likely accepted
-                            const stillHasButton = Array.from(document.querySelectorAll('button')).some(b => {
-                                const text = b.textContent.trim();
-                                return text === 'Take part in this study' && !b.disabled;
-                            });
-
-                            if (stillHasButton) {
-                                // Button still exists - acceptance likely failed
-                                failedCount++;
-                                GM_setValue('failedCount', failedCount);
-                                const failedEl = document.getElementById('prolific-failed-count');
-                                if (failedEl) {
-                                    failedEl.textContent = failedCount;
-                                }
-                                const now = new Date();
-                                const timeStr = now.toLocaleTimeString();
-                                addDebugLog(`✗ Failed to accept at ${timeStr} (${failedCount} failed)`);
-                            } else {
-                                // Button is gone - acceptance was successful
-                                acceptCount++;
-                                GM_setValue('acceptCount', acceptCount);
-                                const countElement = document.getElementById('prolific-accept-count');
-                                if (countElement) {
-                                    countElement.textContent = acceptCount;
-                                }
-                                const now = new Date();
-                                const timeStr = now.toLocaleTimeString();
-                                addDebugLog(`✓ Successfully accepted at ${timeStr} (${acceptCount} total)`);
-                            }
-                        }, 1500);
-
-                    } catch (e) {
-                        addDebugLog(`✗ Error: ${e.message}`);
+                    if (stillHasButton) {
+                        failedCount++;
+                        GM_setValue('failedCount', failedCount);
+                        const failedEl = document.getElementById('prolific-failed-count');
+                        if (failedEl) {
+                            failedEl.textContent = failedCount;
+                        }
+                        const now = new Date();
+                        const timeStr = now.toLocaleTimeString();
+                        addDebugLog(`✗ Failed to accept at ${timeStr} (${failedCount} failed)`);
+                    } else {
+                        acceptCount++;
+                        GM_setValue('acceptCount', acceptCount);
+                        const countElement = document.getElementById('prolific-accept-count');
+                        if (countElement) {
+                            countElement.textContent = acceptCount;
+                        }
+                        const now = new Date();
+                        const timeStr = now.toLocaleTimeString();
+                        addDebugLog(`✓ Successfully accepted at ${timeStr} (${acceptCount} total)`);
                     }
-                }, index * 500);
-            });
+                }, 2000);
+
+            } catch (e) {
+                addDebugLog(`✗ Error: ${e.message}`);
+            }
         }
     }
+
+    // Keyboard shortcut - Right Shift to reset position
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Shift' && e.location === 2) {
+            e.preventDefault();
+            resetMenuPosition();
+        }
+    }, true);
 
     // Initialize
     setTimeout(() => {
         createMenu();
         addDebugLog('Script initialized');
+        addDebugLog('Press Right Shift to reset menu');
         acceptStudies();
     }, 500);
 
     // Run periodically
-    setInterval(acceptStudies, 2000);
+    setInterval(acceptStudies, 500);
 
     // Intercept fetch
     const originalFetch = window.fetch;
     window.fetch = function(...args) {
         return originalFetch.apply(this, args).then(response => {
-            setTimeout(acceptStudies, 500);
+            setTimeout(acceptStudies, 200);
             return response;
         });
     };
@@ -288,7 +345,7 @@
     const originalOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function(...args) {
         this.addEventListener('load', () => {
-            setTimeout(acceptStudies, 500);
+            setTimeout(acceptStudies, 200);
         });
         return originalOpen.apply(this, args);
     };
